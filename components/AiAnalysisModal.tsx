@@ -132,21 +132,40 @@ const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({ isOpen, onClose, tick
       } catch (err: any) {
         console.error(`Error processing ticket ${ticket.ticketId}`, err);
         
-        if (err.message && (err.message.includes('401') || err.message.includes('API key'))) {
+        const msg = err.message?.toLowerCase() || '';
+        const status = err.status || 0;
+        
+        // Check for Auth Errors
+        const isAuthError = msg.includes('401') || msg.includes('api key') || msg.includes('unauthorized') || status === 401;
+        
+        // Check for Rate Limit / Quota Errors
+        const isRateLimit = status === 429 || msg.includes('429') || msg.includes('quota') || msg.includes('too many requests') || msg.includes('resource exhausted');
+
+        if (isAuthError || isRateLimit) {
              isRunningRef.current = false;
              setStep('results');
+             
+             const errorTitle = isRateLimit ? "Rate Limit Exceeded (429)" : "Critical Auth Error";
+             const errorDesc = isRateLimit ? "API Quota Exceeded" : "Invalid API Key";
+             const userAlertMsg = isRateLimit 
+                ? "Analysis stopped: API Quota/Rate limit exceeded. Please try again later or increase the RPM delay." 
+                : "Analysis stopped: Authentication failed.";
+
+             setAuthError(userAlertMsg);
+
              setResults(prev => [...prev, {
                 ticketId: ticket.ticketId,
                 score: 0,
-                summary: "Authentication failed during batch processing.",
+                summary: `Processing halted: ${errorDesc}`,
                 strengths: [],
-                weaknesses: ["Invalid or Expired API Key"],
+                weaknesses: [errorDesc],
                 rcaDetected: false,
-                error: "Critical Auth Error"
+                error: errorTitle
             }]);
             break;
         }
 
+        // Standard per-ticket failure (continue processing)
         setResults(prev => [...prev, {
             ticketId: ticket.ticketId,
             score: 0,
@@ -179,13 +198,42 @@ const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({ isOpen, onClose, tick
   };
 
   const handleDownload = () => {
-    const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(results, null, 2));
-    const downloadAnchorNode = document.createElement('a');
-    downloadAnchorNode.setAttribute("href", dataStr);
-    downloadAnchorNode.setAttribute("download", `amelia_analysis_report_${new Date().toISOString().split('T')[0]}.json`);
-    document.body.appendChild(downloadAnchorNode);
-    downloadAnchorNode.click();
-    downloadAnchorNode.remove();
+    // Define headers
+    const headers = ["Ticket ID", "Score", "Summary", "RCA Detected", "Strengths", "Weaknesses", "Error"];
+
+    // Helper to escape special characters for CSV
+    const escapeCsv = (field: any) => {
+      if (field === null || field === undefined) return '';
+      const stringField = String(field);
+      // If the field contains quotes, commas, or newlines, wrap it in quotes and escape existing quotes
+      if (stringField.includes(',') || stringField.includes('"') || stringField.includes('\n')) {
+        return `"${stringField.replace(/"/g, '""')}"`;
+      }
+      return stringField;
+    };
+
+    // Construct CSV content
+    const csvRows = results.map(res => [
+      res.ticketId,
+      res.score,
+      res.summary,
+      res.rcaDetected ? "Yes" : "No",
+      res.strengths.join('; '), // Join arrays with semicolon to separate items clearly in CSV
+      res.weaknesses.join('; '),
+      res.error || ''
+    ].map(escapeCsv).join(','));
+
+    const csvContent = [headers.join(','), ...csvRows].join('\n');
+
+    // Create a Blob and trigger download
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.setAttribute('href', url);
+    link.setAttribute('download', `amelia_analysis_report_${new Date().toISOString().split('T')[0]}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
   };
 
   const toggleExpand = (id: number) => {
@@ -384,6 +432,14 @@ const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({ isOpen, onClose, tick
 
           {step === 'results' && (
               <div className="space-y-6">
+                  {/* Error Banner for Results View */}
+                  {authError && (
+                    <div className="bg-red-50 border border-red-200 p-4 rounded-xl flex gap-3 items-center text-red-700 animate-pulse mb-4">
+                       <ShieldAlert className="h-5 w-5" />
+                       <span className="text-sm font-medium">{authError}</span>
+                    </div>
+                  )}
+
                   {/* Performance Dashboard Widgets */}
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                       {(() => {
