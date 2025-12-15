@@ -56,10 +56,12 @@ export interface HistoryResponse {
 
 export interface FilterParams {
   clientCode: string;
+  isClientCodeNegated?: boolean;
   clientName: string;
-  priority: string;
-  ticketType: string;
+  priority: string[];
+  ticketType: string[];
   subject?: string;
+  isSubjectNegated?: boolean;
   dateFrom: string;
   dateTo: string;
 }

@@ -17,17 +17,20 @@ import {
   Sparkles,
   Download,
   ArrowUpDown,
-  ListFilter
+  ListFilter,
+  Ban
 } from 'lucide-react';
 
 const Dashboard: React.FC = () => {
   // --- STATE ---
   const [filters, setFilters] = useState<FilterParams>({
     clientCode: '',
+    isClientCodeNegated: false,
     clientName: '',
-    priority: '',
-    ticketType: '',
+    priority: [],
+    ticketType: [],
     subject: '',
+    isSubjectNegated: false,
     dateFrom: new Date(new Date().setDate(new Date().getDate() - 30)).toISOString().split('T')[0],
     dateTo: new Date().toISOString().split('T')[0]
   });
@@ -81,8 +84,19 @@ const Dashboard: React.FC = () => {
     }
   };
 
-  const handleFilterChange = (key: keyof FilterParams, value: string) => {
+  const handleFilterChange = (key: keyof FilterParams, value: any) => {
     setFilters(prev => ({ ...prev, [key]: value }));
+  };
+
+  const toggleArrayFilter = (key: 'priority' | 'ticketType', value: string) => {
+    setFilters(prev => {
+        const current = prev[key] as string[];
+        if (current.includes(value)) {
+            return { ...prev, [key]: current.filter(item => item !== value) };
+        } else {
+            return { ...prev, [key]: [...current, value] };
+        }
+    });
   };
 
   const handleAnalysisUpdate = (result: AiAnalysisResult) => {
@@ -254,53 +268,96 @@ const Dashboard: React.FC = () => {
             </h2>
             <form onSubmit={handleSearch} className="space-y-4">
               <div>
-                <label className="text-xs font-medium text-slate-500 uppercase">Client Code</label>
-                <input 
-                  type="text" 
-                  value={filters.clientCode}
-                  onChange={(e) => handleFilterChange('clientCode', e.target.value)}
-                  className="mt-1 block w-full rounded-md border-slate-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm px-3 py-2 border bg-white text-slate-900"
-                  placeholder="e.g. chipotle"
-                />
+                <label className="text-xs font-medium text-slate-500 uppercase flex justify-between">
+                    Client Code
+                    {filters.isClientCodeNegated && <span className="text-[10px] text-red-500 font-bold uppercase">Excluded</span>}
+                </label>
+                <div className="flex gap-2 mt-1">
+                    <input 
+                    type="text" 
+                    value={filters.clientCode}
+                    onChange={(e) => handleFilterChange('clientCode', e.target.value)}
+                    className={`block w-full rounded-md shadow-sm focus:ring-blue-500 sm:text-sm px-3 py-2 border bg-white text-slate-900 ${filters.isClientCodeNegated ? 'border-red-300 ring-1 ring-red-100' : 'border-slate-300 focus:border-blue-500'}`}
+                    placeholder="e.g. chipotle, ipsoft"
+                    />
+                    <button
+                        type="button"
+                        onClick={() => handleFilterChange('isClientCodeNegated', !filters.isClientCodeNegated)}
+                        className={`p-2 rounded-md border transition-colors ${filters.isClientCodeNegated ? 'bg-red-50 border-red-200 text-red-600' : 'bg-white border-slate-300 text-slate-400 hover:text-slate-600'}`}
+                        title="Exclude this client"
+                    >
+                        <Ban className="h-4 w-4" />
+                    </button>
+                </div>
               </div>
 
               <div>
-                <label className="text-xs font-medium text-slate-500 uppercase">Subject Pattern</label>
-                <input 
-                  type="text" 
-                  value={filters.subject || ''}
-                  onChange={(e) => handleFilterChange('subject', e.target.value)}
-                  className="mt-1 block w-full rounded-md border-slate-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm px-3 py-2 border bg-white text-slate-900"
-                  placeholder="e.g. *error*"
-                />
+                <label className="text-xs font-medium text-slate-500 uppercase flex justify-between">
+                    Subject Pattern
+                    {filters.isSubjectNegated && <span className="text-[10px] text-red-500 font-bold uppercase">Excluded</span>}
+                </label>
+                <div className="flex gap-2 mt-1">
+                    <input 
+                    type="text" 
+                    value={filters.subject || ''}
+                    onChange={(e) => handleFilterChange('subject', e.target.value)}
+                    className={`block w-full rounded-md shadow-sm focus:ring-blue-500 sm:text-sm px-3 py-2 border bg-white text-slate-900 ${filters.isSubjectNegated ? 'border-red-300 ring-1 ring-red-100' : 'border-slate-300 focus:border-blue-500'}`}
+                    placeholder="e.g. *error*"
+                    />
+                    <button
+                        type="button"
+                        onClick={() => handleFilterChange('isSubjectNegated', !filters.isSubjectNegated)}
+                        className={`p-2 rounded-md border transition-colors ${filters.isSubjectNegated ? 'bg-red-50 border-red-200 text-red-600' : 'bg-white border-slate-300 text-slate-400 hover:text-slate-600'}`}
+                        title="Exclude this subject pattern"
+                    >
+                        <Ban className="h-4 w-4" />
+                    </button>
+                </div>
               </div>
               
-              <div className="grid grid-cols-2 gap-2">
+              <div className="space-y-4">
                   <div>
-                    <label className="text-xs font-medium text-slate-500 uppercase">Priority</label>
-                    <select
-                      value={filters.priority}
-                      onChange={(e) => handleFilterChange('priority', e.target.value)}
-                      className="mt-1 block w-full rounded-md border-slate-300 shadow-sm sm:text-xs px-2 py-2 border bg-white text-slate-900"
-                    >
-                      <option value="">All</option>
-                      <option value="P1">P1</option>
-                      <option value="P2">P2</option>
-                      <option value="P3">P3</option>
-                      <option value="P4">P4</option>
-                    </select>
+                    <label className="text-xs font-medium text-slate-500 uppercase mb-1 block">Priority</label>
+                    <div className="flex flex-wrap gap-2">
+                        {['P1', 'P2', 'P3', 'P4'].map(p => (
+                            <button
+                                key={p}
+                                type="button"
+                                onClick={() => toggleArrayFilter('priority', p)}
+                                className={`px-3 py-1 text-xs font-bold rounded-full border transition-all ${
+                                    filters.priority.includes(p) 
+                                    ? 'bg-blue-600 text-white border-blue-600 shadow-sm' 
+                                    : 'bg-white text-slate-600 border-slate-300 hover:border-slate-400'
+                                }`}
+                            >
+                                {p}
+                            </button>
+                        ))}
+                    </div>
                   </div>
+
                   <div>
-                    <label className="text-xs font-medium text-slate-500 uppercase">Type</label>
-                    <select
-                      value={filters.ticketType}
-                      onChange={(e) => handleFilterChange('ticketType', e.target.value)}
-                      className="mt-1 block w-full rounded-md border-slate-300 shadow-sm sm:text-xs px-2 py-2 border bg-white text-slate-900"
-                    >
-                      <option value="">All</option>
-                      <option value="INCIDENT">INC</option>
-                      <option value="SERVICE_REQUEST">SR</option>
-                    </select>
+                    <label className="text-xs font-medium text-slate-500 uppercase mb-1 block">Type</label>
+                    <div className="flex flex-col gap-2">
+                        {[
+                            { id: 'INCIDENT', label: 'Incident' },
+                            { id: 'SERVICE_REQUEST', label: 'Service Request' }
+                        ].map(t => (
+                            <button
+                                key={t.id}
+                                type="button"
+                                onClick={() => toggleArrayFilter('ticketType', t.id)}
+                                className={`px-3 py-2 text-xs font-medium rounded-md border flex items-center justify-between transition-all ${
+                                    filters.ticketType.includes(t.id) 
+                                    ? 'bg-blue-50 text-blue-700 border-blue-200' 
+                                    : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-50'
+                                }`}
+                            >
+                                {t.label}
+                                {filters.ticketType.includes(t.id) && <CheckCircle2 className="h-3 w-3" />}
+                            </button>
+                        ))}
+                    </div>
                   </div>
               </div>
 

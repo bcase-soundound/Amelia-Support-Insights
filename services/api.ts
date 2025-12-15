@@ -121,14 +121,41 @@ export class ApiService {
 
     const queryParts: string[] = [];
 
-    if (filters.clientCode) queryParts.push(`ticketClientCode:${filters.clientCode}`);
+    // Client Code with negation and comma-separation
+    if (filters.clientCode) {
+        const prefix = filters.isClientCodeNegated ? '-' : '';
+        // Split by comma and trim whitespace
+        const codes = filters.clientCode.split(',').map(c => c.trim()).filter(c => c.length > 0);
+        
+        if (codes.length === 1) {
+             queryParts.push(`${prefix}ticketClientCode:${codes[0]}`);
+        } else if (codes.length > 1) {
+             // Join with OR logic
+             const joinedCodes = codes.join(' OR ');
+             queryParts.push(`${prefix}ticketClientCode:(${joinedCodes})`);
+        }
+    }
+
     if (filters.clientName) queryParts.push(`ticketClientName:${filters.clientName}`);
-    if (filters.priority) queryParts.push(`priority:${filters.priority}`);
-    if (filters.ticketType) queryParts.push(`ticketType:${filters.ticketType}`);
+
+    // Priority Multi-select
+    if (filters.priority && filters.priority.length > 0) {
+        // Lucene syntax for OR: priority:(P1 OR P2)
+        const pQuery = filters.priority.join(' OR ');
+        queryParts.push(`priority:(${pQuery})`);
+    }
+
+    // Ticket Type Multi-select
+    if (filters.ticketType && filters.ticketType.length > 0) {
+        const tQuery = filters.ticketType.join(' OR ');
+        queryParts.push(`ticketType:(${tQuery})`);
+    }
     
-    // Subject filter - wrap in parentheses to handle spaces safely (e.g. subject:(system down))
+    // Subject filter with negation
     if (filters.subject) {
-        queryParts.push(`subject:(${filters.subject})`);
+        const prefix = filters.isSubjectNegated ? '-' : '';
+        // Wrap in parentheses to handle spaces safely (e.g. subject:(system down))
+        queryParts.push(`${prefix}subject:(${filters.subject})`);
     }
     
     // Date handling
