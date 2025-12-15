@@ -57,24 +57,11 @@ export class AiService {
     }
   }
 
-  static async analyzeTicket(
-    ticket: Ticket, 
-    history: TicketHistoryItem[], 
-    modelName: string,
-    apiKey?: string
-  ): Promise<AiAnalysisResult> {
-    
-    // Use provided key or fallback to environment variable
-    const key = apiKey ? apiKey.trim().replace(/^["']|["']$/g, '') : process.env.API_KEY;
-    
-    if (!key) {
-      throw new Error("API Key is missing. Please provide a key or configure the environment.");
-    }
-
-    // Initialize GoogleGenAI
-    const ai = new GoogleGenAI({ apiKey: key });
-
-    // Construct a context-rich prompt
+  /**
+   * Constructs the prompt text without sending it. 
+   * Useful for UI previews.
+   */
+  static constructPrompt(ticket: Ticket, history: TicketHistoryItem[]): string {
     const historyText = history.map(h => {
       let details = '';
       if (h.comment) {
@@ -89,7 +76,7 @@ export class AiService {
       return `[${h.created}] ${h.actorName || h.actorId} (${h.source}): ${details}`;
     }).join('\n');
 
-    const prompt = `
+    return `
       You are a QA Auditor for IT Support Tickets.
       Analyze the following ticket and its history.
       
@@ -112,6 +99,26 @@ export class AiService {
       
       Provide a strict JSON response.
     `;
+  }
+
+  static async analyzeTicket(
+    ticket: Ticket, 
+    history: TicketHistoryItem[], 
+    modelName: string,
+    apiKey?: string
+  ): Promise<AiAnalysisResult> {
+    
+    // Use provided key or fallback to environment variable
+    const key = apiKey ? apiKey.trim().replace(/^["']|["']$/g, '') : process.env.API_KEY;
+    
+    if (!key) {
+      throw new Error("API Key is missing. Please provide a key or configure the environment.");
+    }
+
+    // Initialize GoogleGenAI
+    const ai = new GoogleGenAI({ apiKey: key });
+
+    const prompt = this.constructPrompt(ticket, history);
 
     // Direct call. If this fails (401, 403, etc), it will throw an Error.
     const response = await ai.models.generateContent({
