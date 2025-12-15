@@ -159,7 +159,7 @@ export class ApiService {
   static async getTicketHistory(ticketId: number): Promise<HistoryResponse> {
     if (!this.token) throw new Error('Not authenticated');
 
-    const targetUrl = `${BASE_TICKET_URL}/${ticketId}/history`;
+    const targetUrl = `${BASE_TICKET_URL}/${ticketId}/history/all`;
 
     const response = await fetch(this.getProxiedUrl(targetUrl), {
       method: 'GET',
