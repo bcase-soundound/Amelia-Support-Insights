@@ -1,0 +1,5 @@
+{
+  "name": "Amelia Support Insights",
+  "description": "A professional dashboard to query, filter, and analyze support tickets and their history from the Amelia Reporting API.",
+  "requestFramePermissions": []
+}
