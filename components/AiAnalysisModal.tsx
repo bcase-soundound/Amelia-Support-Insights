@@ -6,38 +6,30 @@ import {
   X, 
   Bot, 
   Play, 
-  AlertCircle, 
-  CheckCircle2, 
-  ChevronDown, 
-  ChevronUp,
   BrainCircuit,
   Key,
   Loader2,
   ShieldAlert,
-  Maximize2,
-  Minimize2,
-  Download,
   FileCode,
-  BarChart3,
-  TrendingUp,
-  AlertTriangle
+  CheckCircle2,
+  ArrowRight
 } from 'lucide-react';
 
 interface AiAnalysisModalProps {
   isOpen: boolean;
   onClose: () => void;
   tickets: Ticket[];
+  onAnalysisUpdate: (result: AiAnalysisResult) => void;
 }
 
-const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({ isOpen, onClose, tickets }) => {
-  const [step, setStep] = useState<'config' | 'processing' | 'results'>('config');
-  const [isFullscreen, setIsFullscreen] = useState(false);
+const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({ isOpen, onClose, tickets, onAnalysisUpdate }) => {
+  const [step, setStep] = useState<'config' | 'processing' | 'complete'>('config');
   
   // Default Config
   const [config, setConfig] = useState<AiConfig>({
     apiKey: '',
     model: 'gemini-2.5-flash',
-    rpm: 10
+    rpm: 30 // Increased default slightly for better UX
   });
   
   // Load models statically
@@ -45,9 +37,8 @@ const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({ isOpen, onClose, tick
 
   const [progress, setProgress] = useState(0);
   const [currentProcessingId, setCurrentProcessingId] = useState<number | null>(null);
-  const [results, setResults] = useState<AiAnalysisResult[]>([]);
-  const [expandedResultId, setExpandedResultId] = useState<number | null>(null);
-  const [isVerifying, setIsVerifying] = useState(false);
+  const [processedCount, setProcessedCount] = useState(0);
+  const [errorCount, setErrorCount] = useState(0);
   const [authError, setAuthError] = useState('');
   
   // Prompt Preview State
@@ -61,8 +52,9 @@ const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({ isOpen, onClose, tick
     if (isOpen) {
       // Reset state when opening
       setStep('config');
-      setResults([]);
       setProgress(0);
+      setProcessedCount(0);
+      setErrorCount(0);
       setAuthError('');
       setShowPromptPreview(false);
       isRunningRef.current = false;
@@ -77,7 +69,6 @@ const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({ isOpen, onClose, tick
 
     setIsLoadingPrompt(true);
     try {
-        // Fetch history for the first ticket as a sample
         const sampleTicket = tickets[0];
         const historyResponse = await ApiService.getTicketHistory(sampleTicket.ticketId);
         const generatedPrompt = AiService.constructPrompt(sampleTicket, historyResponse.content);
@@ -91,25 +82,26 @@ const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({ isOpen, onClose, tick
 
   const startAnalysis = async () => {
     setAuthError('');
-    setIsVerifying(true);
-
-    // 1. Verify Connection
-    const isValid = await AiService.validateApiKey(config.apiKey);
     
-    if (!isValid) {
-      setAuthError('Connection failed. Please check your API Key or environment configuration.');
-      setIsVerifying(false);
-      return;
+    // 1. Verify Connection
+    // Quick validation if key is provided, otherwise rely on env/process
+    if (config.apiKey) {
+        const isValid = await AiService.validateApiKey(config.apiKey);
+        if (!isValid) {
+            setAuthError('Connection failed. Please check your API Key.');
+            return;
+        }
     }
 
-    setIsVerifying(false);
     setStep('processing');
-    setResults([]);
     setProgress(0);
+    setProcessedCount(0);
+    setErrorCount(0);
     isRunningRef.current = true;
 
     const delayMs = Math.max(100, 60000 / config.rpm);
-    const ticketsToProcess = tickets.slice(0, 50);
+    // Limit to 50 for safety in this demo, or remove limit for prod
+    const ticketsToProcess = tickets; 
 
     for (let i = 0; i < ticketsToProcess.length; i++) {
       if (!isRunningRef.current) break;
@@ -128,53 +120,48 @@ const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({ isOpen, onClose, tick
             config.apiKey
         );
 
-        setResults(prev => [...prev, result]);
+        // Send result back to parent immediately
+        onAnalysisUpdate(result);
+        setProcessedCount(prev => prev + 1);
+
       } catch (err: any) {
         console.error(`Error processing ticket ${ticket.ticketId}`, err);
+        setErrorCount(prev => prev + 1);
         
         const msg = err.message?.toLowerCase() || '';
         const status = err.status || 0;
         
-        // Check for Auth Errors
         const isAuthError = msg.includes('401') || msg.includes('api key') || msg.includes('unauthorized') || status === 401;
-        
-        // Check for Rate Limit / Quota Errors
         const isRateLimit = status === 429 || msg.includes('429') || msg.includes('quota') || msg.includes('too many requests') || msg.includes('resource exhausted');
 
         if (isAuthError || isRateLimit) {
              isRunningRef.current = false;
-             setStep('results');
+             setStep('complete');
+             setAuthError(isRateLimit ? "Analysis paused: Rate limit exceeded." : "Analysis stopped: Auth failed.");
              
-             const errorTitle = isRateLimit ? "Rate Limit Exceeded (429)" : "Critical Auth Error";
-             const errorDesc = isRateLimit ? "API Quota Exceeded" : "Invalid API Key";
-             const userAlertMsg = isRateLimit 
-                ? "Analysis stopped: API Quota/Rate limit exceeded. Please try again later or increase the RPM delay." 
-                : "Analysis stopped: Authentication failed.";
-
-             setAuthError(userAlertMsg);
-
-             setResults(prev => [...prev, {
+             // Push a failure result for this specific ticket so it's not lost
+             onAnalysisUpdate({
                 ticketId: ticket.ticketId,
                 score: 0,
-                summary: `Processing halted: ${errorDesc}`,
+                summary: isRateLimit ? "Rate Limit Exceeded" : "Auth Failed",
                 strengths: [],
-                weaknesses: [errorDesc],
+                weaknesses: [],
                 rcaDetected: false,
-                error: errorTitle
-            }]);
-            break;
+                error: isRateLimit ? "429 Quota Exceeded" : "401 Unauthorized"
+             });
+             break;
         }
 
-        // Standard per-ticket failure (continue processing)
-        setResults(prev => [...prev, {
+        // Standard per-ticket failure
+        onAnalysisUpdate({
             ticketId: ticket.ticketId,
             score: 0,
-            summary: "Analysis failed.",
+            summary: "Analysis failed",
             strengths: [],
-            weaknesses: ["Error processing ticket"],
+            weaknesses: [],
             rcaDetected: false,
             error: err.message || "Unknown error"
-        }]);
+        });
       }
 
       setProgress(i + 1);
@@ -188,99 +175,20 @@ const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({ isOpen, onClose, tick
       }
     }
 
-    setStep('results');
+    setStep('complete');
     isRunningRef.current = false;
   };
 
   const handleStop = () => {
     isRunningRef.current = false;
-    setStep('results'); 
-  };
-
-  const handleDownload = () => {
-    // Define headers
-    const headers = ["Ticket ID", "Score", "Summary", "RCA Detected", "Strengths", "Weaknesses", "Error"];
-
-    // Helper to escape special characters for CSV
-    const escapeCsv = (field: any) => {
-      if (field === null || field === undefined) return '';
-      const stringField = String(field);
-      // If the field contains quotes, commas, or newlines, wrap it in quotes and escape existing quotes
-      if (stringField.includes(',') || stringField.includes('"') || stringField.includes('\n')) {
-        return `"${stringField.replace(/"/g, '""')}"`;
-      }
-      return stringField;
-    };
-
-    // Construct CSV content
-    const csvRows = results.map(res => [
-      res.ticketId,
-      res.score,
-      res.summary,
-      res.rcaDetected ? "Yes" : "No",
-      res.strengths.join('; '), // Join arrays with semicolon to separate items clearly in CSV
-      res.weaknesses.join('; '),
-      res.error || ''
-    ].map(escapeCsv).join(','));
-
-    const csvContent = [headers.join(','), ...csvRows].join('\n');
-
-    // Create a Blob and trigger download
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.setAttribute('href', url);
-    link.setAttribute('download', `amelia_analysis_report_${new Date().toISOString().split('T')[0]}.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-  };
-
-  const toggleExpand = (id: number) => {
-    setExpandedResultId(expandedResultId === id ? null : id);
-  };
-
-  const getScoreColor = (score: number, error?: string) => {
-    if (error) return 'text-red-600 bg-red-50 border-red-200';
-    if (score >= 8) return 'text-green-600 bg-green-50 border-green-200';
-    if (score >= 5) return 'text-yellow-600 bg-yellow-50 border-yellow-200';
-    return 'text-red-600 bg-red-50 border-red-200';
-  };
-
-  // Helper to calculate stats
-  const getStats = () => {
-      const total = results.length;
-      if (total === 0) return { avgScore: 0, rcaPercent: 0, commonWeakness: 'N/A' };
-      
-      const validResults = results.filter(r => !r.error);
-      const avgScore = validResults.reduce((acc, curr) => acc + curr.score, 0) / (validResults.length || 1);
-      const rcaCount = validResults.filter(r => r.rcaDetected).length;
-      
-      // Calculate common weaknesses
-      const weaknessMap: Record<string, number> = {};
-      validResults.forEach(r => {
-          r.weaknesses.forEach(w => {
-              // Simple normalization
-              const key = w.toLowerCase().trim();
-              weaknessMap[key] = (weaknessMap[key] || 0) + 1;
-          });
-      });
-      
-      const sortedWeaknesses = Object.entries(weaknessMap).sort((a,b) => b[1] - a[1]);
-      const commonWeakness = sortedWeaknesses.length > 0 ? sortedWeaknesses[0][0] : 'None';
-
-      return {
-          avgScore: avgScore.toFixed(1),
-          rcaPercent: Math.round((rcaCount / (validResults.length || 1)) * 100),
-          commonWeakness
-      };
+    setStep('complete'); 
   };
 
   if (!isOpen) return null;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm transition-all duration-300">
-      <div className={`bg-white flex flex-col overflow-hidden border border-slate-200 shadow-2xl transition-all duration-300 ${isFullscreen ? 'fixed inset-0 w-full h-full rounded-none' : 'w-full max-w-2xl h-[80vh] rounded-2xl'}`}>
+      <div className="bg-white flex flex-col overflow-hidden border border-slate-200 shadow-2xl rounded-2xl w-full max-w-lg">
         
         {/* Header */}
         <div className="px-6 py-4 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
@@ -293,38 +201,27 @@ const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({ isOpen, onClose, tick
                 <p className="text-xs text-slate-500">Powered by Gemini 2.5</p>
             </div>
           </div>
-          <div className="flex items-center gap-1">
-            <button 
-                onClick={() => setIsFullscreen(!isFullscreen)} 
-                className="p-2 hover:bg-slate-200 rounded-lg text-slate-500 transition-colors hidden sm:block"
-                title={isFullscreen ? "Minimize" : "Maximize"}
-            >
-                {isFullscreen ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
-            </button>
-            <button onClick={onClose} className="p-2 hover:bg-slate-200 rounded-lg text-slate-500 transition-colors">
-                <X className="h-5 w-5" />
-            </button>
-          </div>
+          <button onClick={onClose} className="p-2 hover:bg-slate-200 rounded-lg text-slate-500 transition-colors">
+              <X className="h-5 w-5" />
+          </button>
         </div>
 
         {/* Content */}
-        <div className="flex-1 overflow-y-auto p-6 bg-slate-50/30">
+        <div className="p-6">
           
           {step === 'config' && (
             <div className="space-y-6">
                 <div className="bg-blue-50 border border-blue-100 p-4 rounded-xl flex gap-3">
                     <BrainCircuit className="h-6 w-6 text-blue-600 flex-shrink-0" />
                     <div className="text-sm text-blue-800">
-                        <p className="font-semibold mb-1">About this analysis</p>
-                        This process will read filtered tickets ({tickets.length} total) and their history. 
-                        It uses the Gemini API key from your environment by default.
+                        <p className="font-semibold mb-1">Configuration</p>
+                        Analyze {tickets.length} tickets. Results will be merged into your dashboard for sorting and export.
                     </div>
                 </div>
 
                 {authError && (
-                  <div className="bg-red-50 border border-red-200 p-4 rounded-xl flex gap-3 items-center text-red-700 animate-pulse">
-                     <ShieldAlert className="h-5 w-5" />
-                     <span className="text-sm font-medium">{authError}</span>
+                  <div className="bg-red-50 border border-red-200 p-3 rounded-lg flex gap-2 items-center text-red-700 text-sm">
+                     <ShieldAlert className="h-4 w-4" /> {authError}
                   </div>
                 )}
 
@@ -369,36 +266,31 @@ const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({ isOpen, onClose, tick
                                 max="120"
                                 value={config.rpm}
                                 onChange={(e) => setConfig({...config, rpm: parseInt(e.target.value) || 10})}
-                                className="w-full rounded-lg border-slate-300 shadow-sm focus:border-purple-500 focus:ring-purple-500 py-2.5 px-3 text-slate-900"
+                                className="w-full rounded-lg border-slate-300 shadow-sm focus:border-purple-500 focus:ring-purple-500 py-2.5 px-3 bg-white text-slate-900"
                             />
                         </div>
                     </div>
                 </div>
-
-                {/* Prompt Preview Section */}
-                <div className="border-t border-slate-200 pt-4">
+                
+                <div className="border-t border-slate-200 pt-3">
                    <button 
                      onClick={handlePreviewPrompt}
-                     className="flex items-center gap-2 text-sm text-slate-600 hover:text-purple-600 transition-colors"
+                     className="flex items-center gap-2 text-xs text-slate-500 hover:text-purple-600 transition-colors"
                    >
-                     <FileCode className="h-4 w-4" />
-                     {showPromptPreview ? "Hide Prompt Preview" : "Preview Prompt Template"}
+                     <FileCode className="h-3 w-3" />
+                     {showPromptPreview ? "Hide Preview" : "Preview Prompt"}
                    </button>
-                   
                    {showPromptPreview && (
-                     <div className="mt-3 bg-slate-800 rounded-lg p-4 overflow-hidden relative group">
+                     <div className="mt-2 bg-slate-800 rounded-lg p-3 overflow-hidden">
                         {isLoadingPrompt ? (
-                            <div className="flex items-center gap-2 text-slate-400 text-sm">
-                                <Loader2 className="animate-spin h-4 w-4" /> Generating preview from first ticket...
+                            <div className="flex items-center gap-2 text-slate-400 text-xs">
+                                <Loader2 className="animate-spin h-3 w-3" /> Generating...
                             </div>
                         ) : (
-                            <pre className="text-xs text-green-400 font-mono whitespace-pre-wrap overflow-x-auto h-64 custom-scrollbar">
+                            <pre className="text-[10px] text-green-400 font-mono whitespace-pre-wrap h-32 overflow-y-auto custom-scrollbar">
                                 {promptText}
                             </pre>
                         )}
-                        <div className="absolute top-2 right-2 px-2 py-1 bg-slate-700 rounded text-[10px] text-slate-300">
-                             Sample: Ticket #{tickets[0]?.ticketId}
-                        </div>
                      </div>
                    )}
                 </div>
@@ -406,8 +298,8 @@ const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({ isOpen, onClose, tick
           )}
 
           {step === 'processing' && (
-             <div className="flex flex-col items-center justify-center h-full py-10 space-y-6">
-                <div className="relative h-24 w-24">
+             <div className="flex flex-col items-center justify-center py-6 space-y-6">
+                <div className="relative h-20 w-20">
                      <svg className="animate-spin h-full w-full text-purple-200" viewBox="0 0 24 24">
                         <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none"></circle>
                         <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
@@ -416,189 +308,78 @@ const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({ isOpen, onClose, tick
                         {Math.round((progress / tickets.length) * 100)}%
                      </div>
                 </div>
-                <div className="text-center">
-                    <h3 className="text-lg font-medium text-slate-900">Analyzing Tickets...</h3>
+                <div className="text-center w-full">
+                    <h3 className="text-base font-medium text-slate-900">Analyzing Tickets...</h3>
                     <p className="text-sm text-slate-500 mt-1">
-                        Processed {progress} of {tickets.length} tickets
+                        Processed {progress} of {tickets.length}
                     </p>
-                    {currentProcessingId && (
-                        <p className="text-xs text-slate-400 mt-2 font-mono">
-                            Reading history for: #{currentProcessingId}
-                        </p>
-                    )}
+                    <div className="w-full bg-slate-100 rounded-full h-2 mt-4 overflow-hidden">
+                        <div 
+                            className="bg-purple-600 h-2 rounded-full transition-all duration-300" 
+                            style={{width: `${(progress / tickets.length) * 100}%`}}
+                        ></div>
+                    </div>
                 </div>
              </div>
           )}
 
-          {step === 'results' && (
-              <div className="space-y-6">
-                  {/* Error Banner for Results View */}
+          {step === 'complete' && (
+              <div className="flex flex-col items-center justify-center py-6 space-y-4 text-center">
+                  <div className={`p-3 rounded-full ${authError ? 'bg-red-100' : 'bg-green-100'}`}>
+                      {authError ? <ShieldAlert className="h-8 w-8 text-red-600"/> : <CheckCircle2 className="h-8 w-8 text-green-600"/>}
+                  </div>
+                  <div>
+                      <h3 className="text-xl font-bold text-slate-800">{authError ? 'Analysis Interrupted' : 'Analysis Complete'}</h3>
+                      <p className="text-slate-500 mt-2">
+                        Successfully processed <strong className="text-slate-800">{processedCount}</strong> tickets.
+                        {errorCount > 0 && <span className="text-red-500 ml-1">({errorCount} failed)</span>}
+                      </p>
+                  </div>
                   {authError && (
-                    <div className="bg-red-50 border border-red-200 p-4 rounded-xl flex gap-3 items-center text-red-700 animate-pulse mb-4">
-                       <ShieldAlert className="h-5 w-5" />
-                       <span className="text-sm font-medium">{authError}</span>
-                    </div>
+                      <div className="bg-red-50 text-red-700 text-sm p-3 rounded-lg border border-red-100 w-full">
+                          {authError}
+                      </div>
                   )}
-
-                  {/* Performance Dashboard Widgets */}
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                      {(() => {
-                          const stats = getStats();
-                          return (
-                              <>
-                                <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex flex-col items-center justify-center">
-                                    <div className="flex items-center gap-2 mb-2">
-                                        <BarChart3 className="h-4 w-4 text-slate-400"/>
-                                        <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Avg Quality</span>
-                                    </div>
-                                    <span className={`text-3xl font-bold ${Number(stats.avgScore) >= 8 ? 'text-green-600' : Number(stats.avgScore) >= 5 ? 'text-yellow-600' : 'text-red-600'}`}>
-                                        {stats.avgScore}
-                                    </span>
-                                    <span className="text-[10px] text-slate-400 mt-1">Target: 8.0+</span>
-                                </div>
-                                
-                                <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex flex-col items-center justify-center">
-                                    <div className="flex items-center gap-2 mb-2">
-                                        <TrendingUp className="h-4 w-4 text-slate-400"/>
-                                        <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">RCA Rate</span>
-                                    </div>
-                                    <span className={`text-3xl font-bold ${stats.rcaPercent >= 90 ? 'text-green-600' : 'text-blue-600'}`}>
-                                        {stats.rcaPercent}%
-                                    </span>
-                                    <span className="text-[10px] text-slate-400 mt-1">Tickets with Root Cause</span>
-                                </div>
-
-                                <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex flex-col items-center justify-center text-center">
-                                    <div className="flex items-center gap-2 mb-2">
-                                        <AlertTriangle className="h-4 w-4 text-slate-400"/>
-                                        <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Top Issue</span>
-                                    </div>
-                                    <span className="text-sm font-semibold text-slate-700 line-clamp-2 px-2">
-                                        {stats.commonWeakness}
-                                    </span>
-                                    <span className="text-[10px] text-slate-400 mt-1">Most Frequent Weakness</span>
-                                </div>
-                              </>
-                          );
-                      })()}
-                  </div>
-
-                  {/* List of Results */}
-                  <div className="space-y-4">
-                    {results.map((res) => (
-                        <div key={res.ticketId} className="border border-slate-200 rounded-lg overflow-hidden bg-white shadow-sm hover:shadow-md transition-shadow">
-                            <div 
-                                className="flex items-center justify-between p-4 cursor-pointer bg-slate-50 hover:bg-slate-100 transition-colors"
-                                onClick={() => toggleExpand(res.ticketId)}
-                            >
-                                <div className="flex items-center gap-4">
-                                    <div className={`flex flex-col items-center justify-center w-12 h-12 rounded-lg border ${getScoreColor(res.score, res.error)}`}>
-                                        {res.error ? <AlertCircle className="h-6 w-6"/> : <span className="text-lg font-bold">{res.score}</span>}
-                                        <span className="text-[9px] uppercase font-medium">{res.error ? 'Error' : 'Score'}</span>
-                                    </div>
-                                    <div>
-                                        <div className="flex items-center gap-2">
-                                            <span className="font-mono text-xs text-slate-500">#{res.ticketId}</span>
-                                            {res.rcaDetected && (
-                                                <span className="text-[10px] bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded font-medium border border-blue-200">RCA DETECTED</span>
-                                            )}
-                                        </div>
-                                        <p className={`text-sm font-medium line-clamp-1 ${res.error ? 'text-red-600' : 'text-slate-800'}`}>
-                                            {res.error ? `Failed: ${res.error}` : res.summary}
-                                        </p>
-                                    </div>
-                                </div>
-                                {expandedResultId === res.ticketId ? <ChevronUp className="h-5 w-5 text-slate-400"/> : <ChevronDown className="h-5 w-5 text-slate-400"/>}
-                            </div>
-                            
-                            {expandedResultId === res.ticketId && (
-                                <div className="p-4 border-t border-slate-200 bg-white grid grid-cols-1 md:grid-cols-2 gap-4">
-                                    {res.error ? (
-                                        <div className="col-span-2 text-xs text-red-600 bg-red-50 p-3 rounded border border-red-100">
-                                            <strong>Analysis Error:</strong> {res.error}
-                                        </div>
-                                    ) : (
-                                        <>
-                                        <div>
-                                            <h4 className="text-xs font-bold text-green-700 uppercase mb-2 flex items-center gap-1">
-                                                <CheckCircle2 className="h-3 w-3"/> Strengths
-                                            </h4>
-                                            <ul className="text-xs text-slate-600 space-y-1 list-disc pl-4">
-                                                {res.strengths.length > 0 ? res.strengths.map((s, i) => <li key={i}>{s}</li>) : <li>No specific strengths detected.</li>}
-                                            </ul>
-                                        </div>
-                                        <div>
-                                            <h4 className="text-xs font-bold text-red-700 uppercase mb-2 flex items-center gap-1">
-                                                <AlertCircle className="h-3 w-3"/> Weaknesses
-                                        </h4>
-                                            <ul className="text-xs text-slate-600 space-y-1 list-disc pl-4">
-                                                {res.weaknesses.length > 0 ? res.weaknesses.map((w, i) => <li key={i}>{w}</li>) : <li>No specific weaknesses detected.</li>}
-                                            </ul>
-                                        </div>
-                                        </>
-                                    )}
-                                </div>
-                            )}
-                        </div>
-                    ))}
-                  </div>
-                  
-                  {results.length === 0 && (
-                      <div className="text-center text-slate-500 py-10">No results generated.</div>
-                  )}
+                  <p className="text-sm text-slate-400 max-w-xs">
+                      The results have been merged into your dashboard. You can now sort by score or filter by RCA status.
+                  </p>
               </div>
           )}
         </div>
 
         {/* Footer */}
-        <div className="px-6 py-4 border-t border-slate-100 bg-slate-50 flex justify-between items-center">
-            <div className="text-xs text-slate-400">
-                {step === 'results' && `Analyzed ${results.length} tickets`}
-            </div>
-            
-            <div className="flex gap-3">
-                {step === 'config' && (
-                    <>
-                        <button onClick={onClose} className="px-4 py-2 text-sm font-medium text-slate-600 hover:text-slate-800">
-                            Cancel
-                        </button>
-                        <button 
-                            onClick={startAnalysis} 
-                            disabled={tickets.length === 0 || isVerifying}
-                            className="flex items-center gap-2 px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white text-sm font-medium rounded-lg shadow-sm transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-                        >
-                            {isVerifying ? <Loader2 className="animate-spin h-4 w-4" /> : <Play className="h-4 w-4" />}
-                            {isVerifying ? "Verifying..." : "Start Analysis"}
-                        </button>
-                    </>
-                )}
-                
-                {step === 'processing' && (
-                    <button 
-                        onClick={handleStop}
-                        className="px-4 py-2 border border-red-200 text-red-600 hover:bg-red-50 text-sm font-medium rounded-lg"
-                    >
-                        Stop
+        <div className="px-6 py-4 border-t border-slate-100 bg-slate-50 flex justify-end gap-3">
+            {step === 'config' && (
+                <>
+                    <button onClick={onClose} className="px-4 py-2 text-sm font-medium text-slate-600 hover:text-slate-800">
+                        Cancel
                     </button>
-                )}
+                    <button 
+                        onClick={startAnalysis} 
+                        className="flex items-center gap-2 px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white text-sm font-medium rounded-lg shadow-sm transition-all"
+                    >
+                        <Play className="h-4 w-4" /> Start Analysis
+                    </button>
+                </>
+            )}
+            
+            {step === 'processing' && (
+                <button 
+                    onClick={handleStop}
+                    className="px-4 py-2 border border-red-200 text-red-600 hover:bg-red-50 text-sm font-medium rounded-lg"
+                >
+                    Stop Processing
+                </button>
+            )}
 
-                {step === 'results' && (
-                    <>
-                        <button 
-                            onClick={handleDownload}
-                            className="flex items-center gap-2 px-4 py-2 border border-slate-300 bg-white text-slate-700 hover:bg-slate-50 text-sm font-medium rounded-lg"
-                        >
-                            <Download className="h-4 w-4" /> Export Report
-                        </button>
-                        <button 
-                            onClick={() => setStep('config')}
-                            className="px-4 py-2 bg-slate-800 hover:bg-slate-900 text-white text-sm font-medium rounded-lg"
-                        >
-                            New Analysis
-                        </button>
-                    </>
-                )}
-            </div>
+            {step === 'complete' && (
+                <button 
+                    onClick={onClose}
+                    className="flex items-center gap-2 px-6 py-2 bg-slate-800 hover:bg-slate-900 text-white text-sm font-medium rounded-lg shadow-sm"
+                >
+                    View Results <ArrowRight className="h-4 w-4" />
+                </button>
+            )}
         </div>
       </div>
     </div>

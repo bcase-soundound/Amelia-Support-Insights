@@ -59,6 +59,7 @@ export interface FilterParams {
   clientName: string;
   priority: string;
   ticketType: string;
+  subject?: string;
   dateFrom: string;
   dateTo: string;
 }

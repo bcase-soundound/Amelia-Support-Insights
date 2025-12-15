@@ -126,6 +126,11 @@ export class ApiService {
     if (filters.priority) queryParts.push(`priority:${filters.priority}`);
     if (filters.ticketType) queryParts.push(`ticketType:${filters.ticketType}`);
     
+    // Subject filter - wrap in parentheses to handle spaces safely (e.g. subject:(system down))
+    if (filters.subject) {
+        queryParts.push(`subject:(${filters.subject})`);
+    }
+    
     // Date handling
     if (filters.dateFrom && filters.dateTo) {
       const from = `${filters.dateFrom}T00:00:00`;
