@@ -25,8 +25,7 @@ import {
   Zap,
   Activity,
   PanelLeftClose,
-  PanelLeftOpen,
-  CheckCircle
+  PanelLeftOpen
 } from 'lucide-react';
 
 const Dashboard: React.FC = () => {

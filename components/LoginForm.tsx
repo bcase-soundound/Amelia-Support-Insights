@@ -14,7 +14,8 @@ const LoginForm: React.FC<LoginFormProps> = ({ onLoginSuccess }) => {
 
   // Settings State
   const [showSettings, setShowSettings] = useState(false);
-  const [proxyEnabled, setProxyEnabled] = useState(true);
+  const isLocal = window.location.hostname === 'localhost' || window.location.hostname.endsWith('.run.app');
+  const [proxyEnabled, setProxyEnabled] = useState(!isLocal);
   const [proxyUrl, setProxyUrl] = useState('');
 
   const toggleSettings = () => {

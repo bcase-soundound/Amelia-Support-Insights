@@ -35,7 +35,6 @@ const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({ isOpen, onClose, tick
   const availableModels = AiService.getModels();
 
   const [progress, setProgress] = useState(0);
-  const [currentProcessingId, setCurrentProcessingId] = useState<number | null>(null);
   const [processedCount, setProcessedCount] = useState(0);
   const [errorCount, setErrorCount] = useState(0);
   const [authError, setAuthError] = useState('');
@@ -102,8 +101,6 @@ const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({ isOpen, onClose, tick
       if (!isRunningRef.current) break;
       
       const ticket = ticketsToProcess[i];
-      setCurrentProcessingId(ticket.ticketId);
-
       const startTime = Date.now();
 
       try {

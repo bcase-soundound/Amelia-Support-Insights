@@ -9,6 +9,20 @@ export default defineConfig(({ mode }) => {
   return {
     base: './', // Use relative paths for assets to support deployment in subdirectories (like GitHub Pages)
     plugins: [react()],
+    server: {
+      proxy: {
+        '/AmeliaRest': {
+          target: 'https://support.amelia.com',
+          changeOrigin: true,
+          secure: false,
+        },
+        '/api': {
+          target: 'https://support.amelia.com',
+          changeOrigin: true,
+          secure: false,
+        }
+      }
+    },
     define: {
       'process.env.API_KEY': JSON.stringify(env.API_KEY)
     }

@@ -1,4 +1,4 @@
-import { Ticket, SearchResponse, HistoryResponse, FilterParams } from '../types';
+import { SearchResponse, HistoryResponse, FilterParams } from '../types';
 
 // We use a CORS proxy because the Amelia API does not allow cross-origin requests from the browser.
 const DEFAULT_PROXY_URL = 'https://corsproxy.io/?';
@@ -9,7 +9,7 @@ const BASE_TICKET_URL = 'https://support.amelia.com/api/tickets';
 
 export class ApiService {
   private static token: string | null = null;
-  private static proxyEnabled: boolean = true;
+  private static proxyEnabled: boolean = !(window.location.hostname === 'localhost' || window.location.hostname.endsWith('.run.app'));
   private static proxyUrl: string = DEFAULT_PROXY_URL;
 
   static setToken(token: string) {
@@ -31,7 +31,8 @@ export class ApiService {
 
   private static getProxiedUrl(targetUrl: string): string {
     if (!this.proxyEnabled) {
-      return targetUrl;
+      // Local proxy mode: convert full URL to relative path for Vite proxy
+      return targetUrl.replace('https://support.amelia.com', '');
     }
     return `${this.proxyUrl}${encodeURIComponent(targetUrl)}`;
   }

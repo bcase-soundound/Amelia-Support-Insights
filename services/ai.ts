@@ -42,6 +42,21 @@ const analysisSchema: any = {
 
 export class AiService {
   
+  private static STORAGE_KEY = 'GEMINI_API_KEY_OVERRIDE';
+
+  static getApiKey(): string {
+    const override = localStorage.getItem(this.STORAGE_KEY);
+    return override || process.env.API_KEY || '';
+  }
+
+  static setApiKey(key: string): void {
+    if (key) {
+      localStorage.setItem(this.STORAGE_KEY, key);
+    } else {
+      localStorage.removeItem(this.STORAGE_KEY);
+    }
+  }
+
   // Update to use recommended Gemini 3 models for reasoning tasks
   static getModels(): GeminiModel[] {
     return [
@@ -52,10 +67,11 @@ export class AiService {
 
   // Validate the environment API key using the recommended model
   static async validateApiKey(): Promise<boolean> {
-    if (!process.env.API_KEY) return false;
+    const apiKey = this.getApiKey();
+    if (!apiKey) return false;
 
     try {
-      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+      const ai = new GoogleGenAI({ apiKey });
       // Perform a minimal check to verify the key is valid and quota exists
       await ai.models.generateContent({
         model: 'gemini-3-flash-preview',
@@ -121,8 +137,10 @@ export class AiService {
     modelName: string
   ): Promise<AiAnalysisResult> {
     
-    // Always use process.env.API_KEY directly as per guidelines
-    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+    const apiKey = this.getApiKey();
+    if (!apiKey) throw new Error("API Key not configured");
+
+    const ai = new GoogleGenAI({ apiKey });
 
     const prompt = this.constructPrompt(ticket, history);
 
