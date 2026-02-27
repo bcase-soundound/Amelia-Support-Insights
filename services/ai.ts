@@ -41,22 +41,16 @@ const analysisSchema: any = {
 };
 
 export class AiService {
+  private static manualApiKey: string | null = null;
+
+  static setApiKey(key: string) {
+    this.manualApiKey = key;
+  }
+
+  static getApiKey(): string | null {
+    return this.manualApiKey || process.env.API_KEY || null;
+  }
   
-  private static STORAGE_KEY = 'GEMINI_API_KEY_OVERRIDE';
-
-  static getApiKey(): string {
-    const override = localStorage.getItem(this.STORAGE_KEY);
-    return override || process.env.API_KEY || '';
-  }
-
-  static setApiKey(key: string): void {
-    if (key) {
-      localStorage.setItem(this.STORAGE_KEY, key);
-    } else {
-      localStorage.removeItem(this.STORAGE_KEY);
-    }
-  }
-
   // Update to use recommended Gemini 3 models for reasoning tasks
   static getModels(): GeminiModel[] {
     return [
@@ -80,7 +74,7 @@ export class AiService {
       return true;
     } catch (e) {
       console.error("API Key Validation Failed:", e);
-      return false;
+      throw e; // Throw so the UI can catch specific error messages
     }
   }
 

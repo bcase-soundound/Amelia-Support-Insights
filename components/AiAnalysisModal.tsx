@@ -12,7 +12,8 @@ import {
   ShieldAlert,
   FileCode,
   CheckCircle2,
-  ArrowRight
+  ArrowRight,
+  Key
 } from 'lucide-react';
 
 interface AiAnalysisModalProps {
@@ -24,6 +25,8 @@ interface AiAnalysisModalProps {
 
 const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({ isOpen, onClose, tickets, onAnalysisUpdate }) => {
   const [step, setStep] = useState<'config' | 'processing' | 'complete'>('config');
+  const [apiKey, setApiKey] = useState('');
+  const [showApiKey, setShowApiKey] = useState(false);
   
   // Default Config - API Key removed to comply with environment-only security rules
   const [config, setConfig] = useState<AiConfig>({
@@ -56,6 +59,12 @@ const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({ isOpen, onClose, tick
       setAuthError('');
       setShowPromptPreview(false);
       isRunningRef.current = false;
+      
+      // Load current key if any
+      const currentKey = AiService.getApiKey();
+      if (currentKey && currentKey !== process.env.API_KEY) {
+        setApiKey(currentKey);
+      }
     }
   }, [isOpen]);
 
@@ -81,11 +90,21 @@ const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({ isOpen, onClose, tick
   const startAnalysis = async () => {
     setAuthError('');
     
+    // Set the key if provided
+    if (apiKey) {
+      AiService.setApiKey(apiKey);
+    }
+    
     // 1. Verify Connection using internal environment key
-    const isValid = await AiService.validateApiKey();
-    if (!isValid) {
-        setAuthError('Connection failed. Please ensure API_KEY is correctly set in your environment.');
-        return;
+    try {
+      const isValid = await AiService.validateApiKey();
+      if (!isValid) {
+          setAuthError('Connection failed. Please ensure your API key is valid and has sufficient quota.');
+          return;
+      }
+    } catch (err: any) {
+      setAuthError(`Connection error: ${err.message}`);
+      return;
     }
 
     setStep('processing');
@@ -217,6 +236,32 @@ const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({ isOpen, onClose, tick
                 )}
 
                 <div className="space-y-4">
+                    <div className="bg-slate-50 border border-slate-200 p-4 rounded-xl space-y-3">
+                        <div className="flex items-center gap-2 text-slate-700">
+                            <Key className="h-4 w-4" />
+                            <span className="text-sm font-semibold">Gemini API Key</span>
+                        </div>
+                        <div className="relative">
+                            <input 
+                                type={showApiKey ? "text" : "password"}
+                                value={apiKey}
+                                onChange={(e) => setApiKey(e.target.value)}
+                                placeholder={process.env.API_KEY ? "Using environment key (optional to override)" : "Enter your Gemini API key"}
+                                className="w-full rounded-lg border-slate-300 shadow-sm focus:border-purple-500 focus:ring-purple-500 py-2 px-3 bg-white text-slate-900 text-sm"
+                            />
+                            <button 
+                                type="button"
+                                onClick={() => setShowApiKey(!showApiKey)}
+                                className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 text-xs font-medium"
+                            >
+                                {showApiKey ? "Hide" : "Show"}
+                            </button>
+                        </div>
+                        <p className="text-[10px] text-slate-500">
+                            Your key is used only for this session and is not stored permanently.
+                        </p>
+                    </div>
+
                     <div className="grid grid-cols-2 gap-4">
                         <div>
                             <label className="block text-sm font-medium text-slate-700 mb-1">Select Model</label>

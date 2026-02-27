@@ -92,3 +92,4 @@ export interface AiConfig {
   model: string;
   rpm: number;
 }
+
