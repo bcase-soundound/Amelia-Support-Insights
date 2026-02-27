@@ -1,7 +1,6 @@
 
 export interface TokenResponse {
   token: string;
-  // Add other fields if returned by the auth endpoint, but token is primary
 }
 
 export interface Ticket {
@@ -43,8 +42,8 @@ export interface TicketHistoryItem {
   id: number;
   created: string;
   actorId: string;
-  actorName?: string; // Often null in JSON, fallback to email if available in context
-  source: string; // 'workflow', 'email', etc.
+  actorName?: string;
+  source: string;
   comment?: HistoryComment;
   fieldUpdates?: HistoryFieldUpdate[];
   ticketId: number;
@@ -64,6 +63,7 @@ export interface FilterParams {
   isSubjectNegated?: boolean;
   dateFrom: string;
   dateTo: string;
+  ticketIds?: string; // New field for bulk ID lists
 }
 
 export enum ViewState {
@@ -71,15 +71,15 @@ export enum ViewState {
   DASHBOARD
 }
 
-// AI Specific Types
-
 export interface AiAnalysisResult {
   ticketId: number;
-  score: number; // 0-10
+  score: number;
   summary: string;
   strengths: string[];
   weaknesses: string[];
   rcaDetected: boolean;
+  timeToRespond?: string;
+  timeToResolve?: string;
   error?: string;
 }
 
@@ -89,7 +89,6 @@ export interface GeminiModel {
 }
 
 export interface AiConfig {
-  apiKey?: string;
   model: string;
   rpm: number;
 }

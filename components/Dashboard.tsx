@@ -1,3 +1,4 @@
+
 import React, { useState, useMemo } from 'react';
 import { ApiService } from '../services/api';
 import { Ticket, TicketHistoryItem, FilterParams, AiAnalysisResult } from '../types';
@@ -18,11 +19,19 @@ import {
   Download,
   ArrowUpDown,
   ListFilter,
-  Ban
+  Ban,
+  ClipboardList,
+  Info,
+  Zap,
+  Activity,
+  PanelLeftClose,
+  PanelLeftOpen,
+  CheckCircle
 } from 'lucide-react';
 
 const Dashboard: React.FC = () => {
   // --- STATE ---
+  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [filters, setFilters] = useState<FilterParams>({
     clientCode: '',
     isClientCodeNegated: false,
@@ -32,23 +41,21 @@ const Dashboard: React.FC = () => {
     subject: '',
     isSubjectNegated: false,
     dateFrom: new Date(new Date().setDate(new Date().getDate() - 30)).toISOString().split('T')[0],
-    dateTo: new Date().toISOString().split('T')[0]
+    dateTo: new Date().toISOString().split('T')[0],
+    ticketIds: ''
   });
 
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [selectedTicket, setSelectedTicket] = useState<Ticket | null>(null);
   const [history, setHistory] = useState<TicketHistoryItem[]>([]);
   
-  // AI Results Map: TicketID -> Result
   const [aiResults, setAiResults] = useState<Record<number, AiAnalysisResult>>({});
   
-  // UI State
   const [isSearching, setIsSearching] = useState(false);
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
   const [error, setError] = useState('');
   const [isAiModalOpen, setIsAiModalOpen] = useState(false);
 
-  // Sorting
   const [sortOption, setSortOption] = useState<'date_desc' | 'date_asc' | 'score_asc' | 'score_desc'>('date_desc');
 
   // --- HANDLERS ---
@@ -58,7 +65,7 @@ const Dashboard: React.FC = () => {
     setIsSearching(true);
     setError('');
     setSelectedTicket(null);
-    setAiResults({}); // Clear previous AI results on new search
+    setAiResults({});
 
     try {
       const response = await ApiService.searchTickets(filters);
@@ -107,13 +114,12 @@ const Dashboard: React.FC = () => {
   };
 
   const handleExport = () => {
-    // 1. Headers
     const headers = [
         "Ticket ID", "Client", "Subject", "Priority", "Status", "Type", "Created", "Resolved", 
+        "TTR (Response)", "TTRS (Resolve)",
         "AI Score", "AI Summary", "RCA Detected", "Strengths", "Weaknesses", "AI Error"
     ];
 
-    // 2. Helper to escape CSV
     const escapeCsv = (field: any) => {
         if (field === null || field === undefined) return '';
         const stringField = String(field);
@@ -123,9 +129,6 @@ const Dashboard: React.FC = () => {
         return stringField;
     };
 
-    // 3. Map Data
-    // We export the filtered/sorted view or the whole current search result? 
-    // Usually exporting what matches current filters is best.
     const csvRows = processedTickets.map(t => {
         const ai = aiResults[t.ticketId];
         return [
@@ -137,6 +140,8 @@ const Dashboard: React.FC = () => {
             t.ticketType,
             t.created,
             t.resolved || '',
+            ai?.timeToRespond || 'N/A',
+            ai?.timeToResolve || 'N/A',
             ai ? ai.score : '',
             ai ? ai.summary : '',
             ai ? (ai.rcaDetected ? "Yes" : "No") : '',
@@ -157,12 +162,9 @@ const Dashboard: React.FC = () => {
     document.body.removeChild(link);
   };
 
-  // --- DERIVED STATE ---
-
   const processedTickets = useMemo(() => {
     let result = [...tickets];
 
-    // Sorting
     result.sort((a, b) => {
         const dateA = new Date(a.created).getTime();
         const dateB = new Date(b.created).getTime();
@@ -173,7 +175,6 @@ const Dashboard: React.FC = () => {
             case 'date_asc': return dateA - dateB;
             case 'date_desc': return dateB - dateA;
             case 'score_asc': 
-                // Put un-scored tickets at the end for clarity? Or treat as 0.
                 if (!aiResults[a.ticketId] && aiResults[b.ticketId]) return 1;
                 if (aiResults[a.ticketId] && !aiResults[b.ticketId]) return -1;
                 return scoreA - scoreB;
@@ -187,11 +188,13 @@ const Dashboard: React.FC = () => {
   }, [tickets, aiResults, sortOption]);
 
   const stats = useMemo(() => {
-     const analyzedCount = Object.keys(aiResults).length;
+     // Explicitly cast to AiAnalysisResult[] because Object.values might be inferred as unknown[]
+     const results = Object.values(aiResults) as AiAnalysisResult[];
+     const analyzedCount = results.length;
      if (analyzedCount === 0) return null;
      
-     const totalScore = Object.values(aiResults).reduce((acc, curr) => acc + (curr.score || 0), 0);
-     const rcaCount = Object.values(aiResults).filter(r => r.rcaDetected).length;
+     const totalScore = results.reduce((acc, curr) => acc + (curr.score || 0), 0);
+     const rcaCount = results.filter(r => r.rcaDetected).length;
      
      return {
         avgScore: (totalScore / analyzedCount).toFixed(1),
@@ -200,7 +203,6 @@ const Dashboard: React.FC = () => {
   }, [aiResults]);
 
 
-  // --- HELPERS ---
   const getStatusColor = (status: string) => {
     switch (status.toUpperCase()) {
       case 'RESOLVED': return 'text-green-700 bg-green-50 border-green-200';
@@ -228,16 +230,23 @@ const Dashboard: React.FC = () => {
   return (
     <div className="flex flex-col h-screen bg-slate-50">
       
-      {/* Header */}
       <header className="bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between shadow-sm z-10">
-        <div className="flex items-center gap-3">
-          <div className="bg-blue-600 p-2 rounded-lg">
-            <Search className="h-5 w-5 text-white" />
+        <div className="flex items-center gap-4">
+          <button 
+            onClick={() => setIsSidebarOpen(!isSidebarOpen)}
+            className="p-2 hover:bg-slate-100 rounded-lg text-slate-500 transition-colors"
+            title={isSidebarOpen ? "Collapse filters" : "Expand filters"}
+          >
+            {isSidebarOpen ? <PanelLeftClose className="h-5 w-5" /> : <PanelLeftOpen className="h-5 w-5" />}
+          </button>
+          <div className="flex items-center gap-3">
+            <div className="bg-blue-600 p-2 rounded-lg">
+              <Search className="h-5 w-5 text-white" />
+            </div>
+            <h1 className="text-xl font-bold text-slate-800">Support Explorer</h1>
           </div>
-          <h1 className="text-xl font-bold text-slate-800">Support Explorer</h1>
         </div>
         <div className="flex items-center gap-4">
-             {/* Global Stats Widget if AI is active */}
              {stats && (
                  <div className="hidden md:flex items-center gap-4 mr-4 px-4 py-1.5 bg-slate-50 rounded-lg border border-slate-200">
                      <div className="flex flex-col items-center">
@@ -260,176 +269,195 @@ const Dashboard: React.FC = () => {
 
       <div className="flex flex-1 overflow-hidden">
         
-        {/* Left Sidebar / Filter Panel */}
-        <aside className="w-72 bg-white border-r border-slate-200 flex flex-col z-0 overflow-y-auto flex-shrink-0">
-          <div className="p-5 border-b border-slate-100">
-            <h2 className="text-sm font-semibold text-slate-900 uppercase tracking-wider mb-4 flex items-center gap-2">
-              <Filter className="h-4 w-4" /> Filters
-            </h2>
-            <form onSubmit={handleSearch} className="space-y-4">
-              <div>
-                <label className="text-xs font-medium text-slate-500 uppercase flex justify-between">
-                    Client Code
-                    {filters.isClientCodeNegated && <span className="text-[10px] text-red-500 font-bold uppercase">Excluded</span>}
-                </label>
-                <div className="flex gap-2 mt-1">
-                    <input 
-                    type="text" 
-                    value={filters.clientCode}
-                    onChange={(e) => handleFilterChange('clientCode', e.target.value)}
-                    className={`block w-full rounded-md shadow-sm focus:ring-blue-500 sm:text-sm px-3 py-2 border bg-white text-slate-900 ${filters.isClientCodeNegated ? 'border-red-300 ring-1 ring-red-100' : 'border-slate-300 focus:border-blue-500'}`}
-                    placeholder="e.g. chipotle, ipsoft"
-                    />
-                    <button
-                        type="button"
-                        onClick={() => handleFilterChange('isClientCodeNegated', !filters.isClientCodeNegated)}
-                        className={`p-2 rounded-md border transition-colors ${filters.isClientCodeNegated ? 'bg-red-50 border-red-200 text-red-600' : 'bg-white border-slate-300 text-slate-400 hover:text-slate-600'}`}
-                        title="Exclude this client"
-                    >
-                        <Ban className="h-4 w-4" />
-                    </button>
+        <aside className={`bg-white border-r border-slate-200 flex flex-col z-0 overflow-y-auto flex-shrink-0 custom-scrollbar transition-all duration-300 ease-in-out ${isSidebarOpen ? 'w-72' : 'w-0 border-r-0'}`}>
+          <div className={`w-72 flex flex-col h-full transition-opacity duration-300 ${isSidebarOpen ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
+            <div className="p-5 border-b border-slate-100">
+              <h2 className="text-sm font-semibold text-slate-900 uppercase tracking-wider mb-4 flex items-center gap-2">
+                <Filter className="h-4 w-4" /> Filters
+              </h2>
+              <form onSubmit={handleSearch} className="space-y-4">
+                
+                {/* Ticket ID Bulk Search */}
+                <div>
+                  <label className="text-xs font-medium text-slate-500 uppercase flex items-center gap-1.5">
+                      <ClipboardList className="h-3 w-3" /> Specific Ticket IDs
+                  </label>
+                  <div className="mt-1">
+                      <textarea 
+                          value={filters.ticketIds}
+                          onChange={(e) => handleFilterChange('ticketIds', e.target.value)}
+                          className="block w-full rounded-md border-slate-300 shadow-sm focus:ring-blue-500 focus:border-blue-500 sm:text-xs px-3 py-2 border bg-white text-slate-900 min-h-[80px]"
+                          placeholder="Paste list (comma, space, or newline separated)"
+                      />
+                  </div>
+                  {filters.ticketIds && filters.ticketIds.trim() && (
+                      <div className="mt-2 flex items-start gap-1.5 text-[10px] text-amber-600 bg-amber-50 p-2 rounded border border-amber-100">
+                          <Info className="h-3 w-3 flex-shrink-0" />
+                          <span>Date Range filter is bypassed when searching by specific IDs.</span>
+                      </div>
+                  )}
                 </div>
-              </div>
 
-              <div>
-                <label className="text-xs font-medium text-slate-500 uppercase flex justify-between">
-                    Subject Pattern
-                    {filters.isSubjectNegated && <span className="text-[10px] text-red-500 font-bold uppercase">Excluded</span>}
-                </label>
-                <div className="flex gap-2 mt-1">
-                    <input 
-                    type="text" 
-                    value={filters.subject || ''}
-                    onChange={(e) => handleFilterChange('subject', e.target.value)}
-                    className={`block w-full rounded-md shadow-sm focus:ring-blue-500 sm:text-sm px-3 py-2 border bg-white text-slate-900 ${filters.isSubjectNegated ? 'border-red-300 ring-1 ring-red-100' : 'border-slate-300 focus:border-blue-500'}`}
-                    placeholder="e.g. *error*"
-                    />
-                    <button
-                        type="button"
-                        onClick={() => handleFilterChange('isSubjectNegated', !filters.isSubjectNegated)}
-                        className={`p-2 rounded-md border transition-colors ${filters.isSubjectNegated ? 'bg-red-50 border-red-200 text-red-600' : 'bg-white border-slate-300 text-slate-400 hover:text-slate-600'}`}
-                        title="Exclude this subject pattern"
-                    >
-                        <Ban className="h-4 w-4" />
-                    </button>
+                <div>
+                  <label className="text-xs font-medium text-slate-500 uppercase flex justify-between">
+                      Client Code
+                      {filters.isClientCodeNegated && <span className="text-[10px] text-red-500 font-bold uppercase">Excluded</span>}
+                  </label>
+                  <div className="flex gap-2 mt-1">
+                      <input 
+                      type="text" 
+                      value={filters.clientCode}
+                      onChange={(e) => handleFilterChange('clientCode', e.target.value)}
+                      className={`block w-full rounded-md shadow-sm focus:ring-blue-500 sm:text-sm px-3 py-2 border bg-white text-slate-900 ${filters.isClientCodeNegated ? 'border-red-300 ring-1 ring-red-100' : 'border-slate-300 focus:border-blue-500'}`}
+                      placeholder="e.g. chipotle, ipsoft"
+                      />
+                      <button
+                          type="button"
+                          onClick={() => handleFilterChange('isClientCodeNegated', !filters.isClientCodeNegated)}
+                          className={`p-2 rounded-md border transition-colors ${filters.isClientCodeNegated ? 'bg-red-50 border-red-200 text-red-600' : 'bg-white border-slate-300 text-slate-400 hover:text-slate-600'}`}
+                          title="Exclude this client"
+                      >
+                          <Ban className="h-4 w-4" />
+                      </button>
+                  </div>
                 </div>
-              </div>
-              
-              <div className="space-y-4">
-                  <div>
-                    <label className="text-xs font-medium text-slate-500 uppercase mb-1 block">Priority</label>
-                    <div className="flex flex-wrap gap-2">
-                        {['P1', 'P2', 'P3', 'P4'].map(p => (
-                            <button
-                                key={p}
-                                type="button"
-                                onClick={() => toggleArrayFilter('priority', p)}
-                                className={`px-3 py-1 text-xs font-bold rounded-full border transition-all ${
-                                    filters.priority.includes(p) 
-                                    ? 'bg-blue-600 text-white border-blue-600 shadow-sm' 
-                                    : 'bg-white text-slate-600 border-slate-300 hover:border-slate-400'
-                                }`}
-                            >
-                                {p}
-                            </button>
-                        ))}
+
+                <div>
+                  <label className="text-xs font-medium text-slate-500 uppercase flex justify-between">
+                      Subject Pattern
+                      {filters.isSubjectNegated && <span className="text-[10px] text-red-500 font-bold uppercase">Excluded</span>}
+                  </label>
+                  <div className="flex gap-2 mt-1">
+                      <input 
+                      type="text" 
+                      value={filters.subject || ''}
+                      onChange={(e) => handleFilterChange('subject', e.target.value)}
+                      className={`block w-full rounded-md shadow-sm focus:ring-blue-500 sm:text-sm px-3 py-2 border bg-white text-slate-900 ${filters.isSubjectNegated ? 'border-red-300 ring-1 ring-red-100' : 'border-slate-300 focus:border-blue-500'}`}
+                      placeholder="e.g. *error*"
+                      />
+                      <button
+                          type="button"
+                          onClick={() => handleFilterChange('isSubjectNegated', !filters.isSubjectNegated)}
+                          className={`p-2 rounded-md border transition-colors ${filters.isSubjectNegated ? 'bg-red-50 border-red-200 text-red-600' : 'bg-white border-slate-300 text-slate-400 hover:text-slate-600'}`}
+                          title="Exclude this subject pattern"
+                      >
+                          <Ban className="h-4 w-4" />
+                      </button>
+                  </div>
+                </div>
+                
+                <div className="space-y-4">
+                    <div>
+                      <label className="text-xs font-medium text-slate-500 uppercase mb-1 block">Priority</label>
+                      <div className="flex flex-wrap gap-2">
+                          {['P1', 'P2', 'P3', 'P4'].map(p => (
+                              <button
+                                  key={p}
+                                  type="button"
+                                  onClick={() => toggleArrayFilter('priority', p)}
+                                  className={`px-3 py-1 text-xs font-bold rounded-full border transition-all ${
+                                      filters.priority.includes(p) 
+                                      ? 'bg-blue-600 text-white border-blue-600 shadow-sm' 
+                                      : 'bg-white text-slate-600 border-slate-300 hover:border-slate-400'
+                                  }`}
+                              >
+                                  {p}
+                              </button>
+                          ))}
+                      </div>
                     </div>
-                  </div>
 
-                  <div>
-                    <label className="text-xs font-medium text-slate-500 uppercase mb-1 block">Type</label>
-                    <div className="flex flex-col gap-2">
-                        {[
-                            { id: 'INCIDENT', label: 'Incident' },
-                            { id: 'SERVICE_REQUEST', label: 'Service Request' }
-                        ].map(t => (
-                            <button
-                                key={t.id}
-                                type="button"
-                                onClick={() => toggleArrayFilter('ticketType', t.id)}
-                                className={`px-3 py-2 text-xs font-medium rounded-md border flex items-center justify-between transition-all ${
-                                    filters.ticketType.includes(t.id) 
-                                    ? 'bg-blue-50 text-blue-700 border-blue-200' 
-                                    : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-50'
-                                }`}
-                            >
-                                {t.label}
-                                {filters.ticketType.includes(t.id) && <CheckCircle2 className="h-3 w-3" />}
-                            </button>
-                        ))}
+                    <div>
+                      <label className="text-xs font-medium text-slate-500 uppercase mb-1 block">Type</label>
+                      <div className="flex flex-col gap-2">
+                          {[
+                              { id: 'INCIDENT', label: 'Incident' },
+                              { id: 'SERVICE_REQUEST', label: 'Service Request' }
+                          ].map(t => (
+                              <button
+                                  key={t.id}
+                                  type="button"
+                                  onClick={() => toggleArrayFilter('ticketType', t.id)}
+                                  className={`px-3 py-2 text-xs font-medium rounded-md border flex items-center justify-between transition-all ${
+                                      filters.ticketType.includes(t.id) 
+                                      ? 'bg-blue-50 text-blue-700 border-blue-200' 
+                                      : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-50'
+                                  }`}
+                              >
+                                  {t.label}
+                                  {filters.ticketType.includes(t.id) && <CheckCircle2 className="h-3 w-3" />}
+                              </button>
+                          ))}
+                      </div>
                     </div>
-                  </div>
-              </div>
+                </div>
 
-              <div>
-                  <label className="text-xs font-medium text-slate-500 uppercase">Date Range</label>
-                  <div className="grid grid-cols-2 gap-2 mt-1">
-                    <input 
-                        type="date"
-                        value={filters.dateFrom}
-                        onChange={(e) => handleFilterChange('dateFrom', e.target.value)}
-                        className="block w-full rounded-md border-slate-300 shadow-sm sm:text-xs px-2 py-2 border bg-white text-slate-900"
-                    />
-                    <input 
-                        type="date"
-                        value={filters.dateTo}
-                        onChange={(e) => handleFilterChange('dateTo', e.target.value)}
-                        className="block w-full rounded-md border-slate-300 shadow-sm sm:text-xs px-2 py-2 border bg-white text-slate-900"
-                    />
-                  </div>
-              </div>
+                <div className={filters.ticketIds ? 'opacity-30 pointer-events-none' : ''}>
+                    <label className="text-xs font-medium text-slate-500 uppercase">Date Range</label>
+                    <div className="grid grid-cols-2 gap-2 mt-1">
+                      <input 
+                          type="date"
+                          value={filters.dateFrom}
+                          onChange={(e) => handleFilterChange('dateFrom', e.target.value)}
+                          className="block w-full rounded-md border-slate-300 shadow-sm sm:text-xs px-2 py-2 border bg-white text-slate-900"
+                      />
+                      <input 
+                          type="date"
+                          value={filters.dateTo}
+                          onChange={(e) => handleFilterChange('dateTo', e.target.value)}
+                          className="block w-full rounded-md border-slate-300 shadow-sm sm:text-xs px-2 py-2 border bg-white text-slate-900"
+                      />
+                    </div>
+                </div>
 
-              <button
-                type="submit"
-                disabled={isSearching}
-                className="w-full flex justify-center items-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-colors"
-              >
-                {isSearching ? <RefreshCw className="animate-spin h-4 w-4" /> : 'Apply Filters'}
-              </button>
-            </form>
+                <button
+                  type="submit"
+                  disabled={isSearching}
+                  className="w-full flex justify-center items-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-colors"
+                >
+                  {isSearching ? <RefreshCw className="animate-spin h-4 w-4" /> : 'Apply Filters'}
+                </button>
+              </form>
+            </div>
+            
+            {Object.keys(aiResults).length > 0 && (
+               <div className="p-5 border-b border-slate-100 bg-purple-50/50">
+                   <h2 className="text-sm font-semibold text-purple-900 uppercase tracking-wider mb-4 flex items-center gap-2">
+                      <Sparkles className="h-4 w-4" /> AI Tools
+                   </h2>
+                   <div className="space-y-4">
+                       <div>
+                          <label className="text-xs font-medium text-slate-500 uppercase flex items-center gap-1">
+                              <ArrowUpDown className="h-3 w-3" /> Sort By
+                          </label>
+                          <select
+                              value={sortOption}
+                              onChange={(e) => setSortOption(e.target.value as any)}
+                              className="mt-1 block w-full rounded-md border-purple-200 shadow-sm sm:text-sm px-3 py-2 border bg-white text-slate-900 focus:border-purple-500 focus:ring-purple-500"
+                          >
+                              <option value="date_desc">Date (Newest)</option>
+                              <option value="date_asc">Date (Oldest)</option>
+                              <option value="score_desc">Quality Score (High-Low)</option>
+                              <option value="score_asc">Quality Score (Low-High)</option>
+                          </select>
+                       </div>
+
+                       <button
+                          onClick={handleExport}
+                          className="w-full flex items-center justify-center gap-2 py-2 px-4 bg-white border border-slate-300 rounded-md shadow-sm text-sm font-medium text-slate-700 hover:bg-slate-50 transition-colors"
+                       >
+                          <Download className="h-4 w-4" /> Export Report
+                       </button>
+                   </div>
+               </div>
+            )}
           </div>
-          
-          {/* AI Sorting & Filtering Panel */}
-          {Object.keys(aiResults).length > 0 && (
-             <div className="p-5 border-b border-slate-100 bg-purple-50/50">
-                 <h2 className="text-sm font-semibold text-purple-900 uppercase tracking-wider mb-4 flex items-center gap-2">
-                    <Sparkles className="h-4 w-4" /> AI Tools
-                 </h2>
-                 <div className="space-y-4">
-                     <div>
-                        <label className="text-xs font-medium text-slate-500 uppercase flex items-center gap-1">
-                            <ArrowUpDown className="h-3 w-3" /> Sort By
-                        </label>
-                        <select
-                            value={sortOption}
-                            onChange={(e) => setSortOption(e.target.value as any)}
-                            className="mt-1 block w-full rounded-md border-purple-200 shadow-sm sm:text-sm px-3 py-2 border bg-white text-slate-900 focus:border-purple-500 focus:ring-purple-500"
-                        >
-                            <option value="date_desc">Date (Newest)</option>
-                            <option value="date_asc">Date (Oldest)</option>
-                            <option value="score_desc">Quality Score (High-Low)</option>
-                            <option value="score_asc">Quality Score (Low-High)</option>
-                        </select>
-                     </div>
-
-                     <button
-                        onClick={handleExport}
-                        className="w-full flex items-center justify-center gap-2 py-2 px-4 bg-white border border-slate-300 rounded-md shadow-sm text-sm font-medium text-slate-700 hover:bg-slate-50 transition-colors"
-                     >
-                        <Download className="h-4 w-4" /> Export Report
-                     </button>
-                 </div>
-             </div>
-          )}
         </aside>
 
-        {/* Main Content Area */}
         <main className="flex-1 flex overflow-hidden relative">
            
-           {/* Ticket List Column */}
            <div className={`flex-1 flex flex-col bg-slate-50 border-r border-slate-200 transition-all duration-300 ${selectedTicket ? 'w-1/3 max-w-md hidden lg:flex' : 'w-full'}`}>
               
-              {/* List Header */}
               <div className="p-4 bg-white border-b border-slate-200 flex justify-between items-center flex-shrink-0">
                  <div className="flex flex-col">
                     <h2 className="text-lg font-medium text-slate-800">Results</h2>
@@ -449,7 +477,6 @@ const Dashboard: React.FC = () => {
                  )}
               </div>
 
-              {/* List Body */}
               <div className="flex-1 overflow-y-auto custom-scrollbar p-4 space-y-3">
                 {error && (
                   <div className="text-center p-4 bg-red-50 text-red-600 rounded-lg text-sm">
@@ -488,12 +515,16 @@ const Dashboard: React.FC = () => {
                             {ticket.subject || "(No Subject)"}
                         </h3>
 
-                        {/* AI Summary Badge inside Ticket Card */}
                         {ai && (
-                            <div className="mb-3 flex items-center gap-2">
+                            <div className="mb-3 flex flex-wrap gap-2">
                                 <div className={`px-2 py-0.5 rounded border text-[10px] font-bold uppercase flex items-center gap-1 ${getScoreColor(ai.score)}`}>
                                     <span>Score: {ai.score}</span>
                                 </div>
+                                {ai.timeToRespond && ai.timeToRespond !== 'N/A' && (
+                                  <div className="px-2 py-0.5 rounded border border-blue-100 bg-blue-50 text-blue-700 text-[10px] font-bold flex items-center gap-1">
+                                    <Zap className="h-2 w-2" /> TTR: {ai.timeToRespond}
+                                  </div>
+                                )}
                                 {ai.rcaDetected && (
                                     <span className="text-[10px] bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded font-bold border border-blue-200 flex items-center gap-1">
                                         <Sparkles className="h-2 w-2"/> RCA
@@ -525,10 +556,8 @@ const Dashboard: React.FC = () => {
               </div>
            </div>
 
-           {/* Ticket Detail View */}
            {(selectedTicket) && (
              <div className="flex-[2] bg-white flex flex-col h-full overflow-hidden absolute inset-0 lg:static z-20">
-               {/* Detail Header */}
                <div className="px-6 py-4 border-b border-slate-200 flex items-center justify-between bg-white shadow-sm flex-shrink-0">
                  <div className="flex items-center gap-4">
                    <button 
@@ -555,12 +584,28 @@ const Dashboard: React.FC = () => {
                  </div>
                </div>
 
-               {/* Scrollable Content */}
                <div className="flex-1 overflow-y-auto custom-scrollbar p-6 bg-slate-50/50">
                   
-                  {/* AI Analysis Card (Top of Detail View) */}
                   {aiResults[selectedTicket.ticketId] && (
                       <div className="max-w-3xl mx-auto mb-8 animate-fadeIn">
+                          {/* Performance Metrics Bar */}
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                              <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex items-center gap-3">
+                                <div className="p-2 bg-blue-50 text-blue-600 rounded-lg"><Zap className="h-5 w-5" /></div>
+                                <div>
+                                  <div className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Response Time (TTR)</div>
+                                  <div className="text-sm font-bold text-slate-700">{aiResults[selectedTicket.ticketId].timeToRespond || 'N/A'}</div>
+                                </div>
+                              </div>
+                              <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex items-center gap-3">
+                                <div className="p-2 bg-green-50 text-green-600 rounded-lg"><Activity className="h-5 w-5" /></div>
+                                <div>
+                                  <div className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Resolution Time (TTRS)</div>
+                                  <div className="text-sm font-bold text-slate-700">{aiResults[selectedTicket.ticketId].timeToResolve || 'N/A'}</div>
+                                </div>
+                              </div>
+                          </div>
+
                           <div className="bg-white rounded-xl border border-purple-200 shadow-sm overflow-hidden">
                              <div className="bg-purple-50 px-4 py-3 border-b border-purple-100 flex justify-between items-center">
                                 <div className="flex items-center gap-2">
@@ -625,12 +670,10 @@ const Dashboard: React.FC = () => {
                       <div className="space-y-6">
                         {history.map((item, index) => (
                           <div key={item.id} className="relative pl-8 group">
-                            {/* Vertical Line */}
                             {index !== history.length - 1 && (
                               <div className="absolute left-[11px] top-6 bottom-[-24px] w-0.5 bg-slate-200 group-hover:bg-slate-300 transition-colors"></div>
                             )}
                             
-                            {/* Icon Logic */}
                             <div className={`absolute left-0 top-1 w-6 h-6 rounded-full border-2 flex items-center justify-center bg-white z-10 
                               ${item.source === 'workflow' ? 'border-purple-400 text-purple-500' : 
                                 item.comment ? 'border-blue-400 text-blue-500' : 'border-slate-300 text-slate-400'}`}>
@@ -639,7 +682,6 @@ const Dashboard: React.FC = () => {
                                <AlertCircle className="h-3 w-3" />}
                             </div>
 
-                            {/* Content Card */}
                             <div className="bg-white rounded-lg border border-slate-200 shadow-sm p-4 hover:border-slate-300 transition-colors">
                               <div className="flex justify-between items-start mb-2">
                                 <div className="text-xs font-medium text-slate-500 flex items-center gap-2">
@@ -651,14 +693,12 @@ const Dashboard: React.FC = () => {
                                 </span>
                               </div>
 
-                              {/* Comment Render */}
                               {item.comment && (
                                 <div className="mt-2 text-sm text-slate-800 bg-slate-50 p-3 rounded border border-slate-100 prose prose-sm max-w-none">
                                   <div dangerouslySetInnerHTML={{ __html: item.comment.content }} />
                                 </div>
                               )}
 
-                              {/* Field Updates Render */}
                               {item.fieldUpdates && item.fieldUpdates.length > 0 && (
                                 <div className="mt-2 space-y-1">
                                   {item.fieldUpdates.map((update, idx) => (
@@ -672,7 +712,6 @@ const Dashboard: React.FC = () => {
                                 </div>
                               )}
                               
-                              {/* Workflow fallback */}
                               {item.source === 'workflow' && !item.comment && (!item.fieldUpdates || item.fieldUpdates.length === 0) && (
                                 <div className="text-xs text-slate-500 italic">
                                   Workflow automation executed.
@@ -689,7 +728,6 @@ const Dashboard: React.FC = () => {
              </div>
            )}
 
-           {/* Empty State for Details */}
            {!selectedTicket && (
              <div className="hidden lg:flex flex-[2] bg-slate-100 items-center justify-center text-slate-400 flex-col">
                 <div className="bg-white p-6 rounded-full shadow-sm mb-4">
@@ -705,7 +743,7 @@ const Dashboard: React.FC = () => {
       <AiAnalysisModal 
         isOpen={isAiModalOpen} 
         onClose={() => setIsAiModalOpen(false)} 
-        tickets={processedTickets} // Pass processed tickets to support filtered analysis
+        tickets={processedTickets}
         onAnalysisUpdate={handleAnalysisUpdate}
       />
     </div>

@@ -1,7 +1,9 @@
-import { GoogleGenAI, Type, Schema } from "@google/genai";
+
+import { GoogleGenAI, Type } from "@google/genai";
 import { Ticket, TicketHistoryItem, AiAnalysisResult, GeminiModel } from '../types';
 
-const analysisSchema: Schema = {
+// Use a plain object for the schema to avoid potential import issues with Type definitions
+const analysisSchema: any = {
   type: Type.OBJECT,
   properties: {
     score: {
@@ -24,30 +26,39 @@ const analysisSchema: Schema = {
     },
     rcaDetected: {
       type: Type.BOOLEAN,
-      description: "True if a Root Cause Analysis was provided or discussed.",
+      description: "True if a Root Cause Analysis was provided or discussed by a human agent.",
     },
+    timeToRespond: {
+      type: Type.STRING,
+      description: "Calculated duration between ticket creation and first human response (e.g. '15m', '2h', '1d'). Use 'N/A' if no human response.",
+    },
+    timeToResolve: {
+      type: Type.STRING,
+      description: "Calculated duration between ticket creation and final resolution (e.g. '4h', '3d'). Use 'N/A' if not resolved.",
+    }
   },
-  required: ["score", "summary", "strengths", "weaknesses", "rcaDetected"],
+  required: ["score", "summary", "strengths", "weaknesses", "rcaDetected", "timeToRespond", "timeToResolve"],
 };
 
 export class AiService {
   
+  // Update to use recommended Gemini 3 models for reasoning tasks
   static getModels(): GeminiModel[] {
     return [
-      { id: 'gemini-2.5-flash', displayName: 'Gemini 2.5 Flash' },
-      { id: 'gemini-2.5-flash-lite', displayName: 'Gemini 2.5 Flash Lite' },
+      { id: 'gemini-3-flash-preview', displayName: 'Gemini 3 Flash' },
+      { id: 'gemini-3-pro-preview', displayName: 'Gemini 3 Pro' },
     ];
   }
 
-  static async validateApiKey(apiKey?: string): Promise<boolean> {
-    const key = apiKey ? apiKey.trim().replace(/^["']|["']$/g, '') : process.env.API_KEY;
-    if (!key) return false;
+  // Validate the environment API key using the recommended model
+  static async validateApiKey(): Promise<boolean> {
+    if (!process.env.API_KEY) return false;
 
     try {
-      const ai = new GoogleGenAI({ apiKey: key });
+      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
       // Perform a minimal check to verify the key is valid and quota exists
       await ai.models.generateContent({
-        model: 'gemini-2.5-flash',
+        model: 'gemini-3-flash-preview',
         contents: 'Test connection',
       });
       return true;
@@ -77,11 +88,12 @@ export class AiService {
     }).join('\n');
 
     return `
-      You are a QA Auditor for IT Support Tickets.
-      Analyze the following ticket and its history.
+      You are a Professional QA Auditor for Enterprise IT Support Tickets.
+      Analyze the following ticket and its history to determine the quality of service provided and calculate performance metrics.
       
       TICKET METADATA:
       ID: ${ticket.ticketId}
+      Created: ${ticket.created}
       Subject: ${ticket.subject}
       Priority: ${ticket.priority}
       Status: ${ticket.status}
@@ -90,12 +102,14 @@ export class AiService {
       FULL HISTORY LOG:
       ${historyText}
       
-      Evaluate based on:
-      1. Timeliness (Response time, resolution time vs priority).
-      2. Transparency (Clear updates to the client).
-      3. Detail (Technical depth suitable for the issue).
-      4. Root Cause Analysis (Was the root cause identified?).
-      5. Follow-up (Was confirmation requested before closing?).
+      EVALUATION CRITERIA:
+      1. Timeliness: 
+         - Calculate 'timeToRespond': The time difference between ticket 'Created' and the very first human agent response or meaningful update. Ignore automated bot messages.
+         - Calculate 'timeToResolve': The total time from 'Created' to when the status first hit 'RESOLVED'.
+      2. Root Cause Analysis (RCA): 
+         - CRITICAL: Only set rcaDetected to true if a human participant (Engineer/Agent) clearly articulates the root cause of the issue in their own words.
+         - IGNORE: Do not count automated tags like "rca:" or "root cause identified".
+      3. Quality Audit: Provide a score (1-10), summary, strengths, and weaknesses.
       
       Provide a strict JSON response.
     `;
@@ -104,23 +118,15 @@ export class AiService {
   static async analyzeTicket(
     ticket: Ticket, 
     history: TicketHistoryItem[], 
-    modelName: string,
-    apiKey?: string
+    modelName: string
   ): Promise<AiAnalysisResult> {
     
-    // Use provided key or fallback to environment variable
-    const key = apiKey ? apiKey.trim().replace(/^["']|["']$/g, '') : process.env.API_KEY;
-    
-    if (!key) {
-      throw new Error("API Key is missing. Please provide a key or configure the environment.");
-    }
-
-    // Initialize GoogleGenAI
-    const ai = new GoogleGenAI({ apiKey: key });
+    // Always use process.env.API_KEY directly as per guidelines
+    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
     const prompt = this.constructPrompt(ticket, history);
 
-    // Direct call. If this fails (401, 403, etc), it will throw an Error.
+    // Direct call using latest generateContent pattern and JSON config
     const response = await ai.models.generateContent({
       model: modelName,
       contents: prompt,
@@ -130,6 +136,7 @@ export class AiService {
       },
     });
 
+    // Access .text property directly as per latest SDK guidelines
     const jsonText = response.text;
     if (!jsonText) throw new Error("Empty response from AI");
     

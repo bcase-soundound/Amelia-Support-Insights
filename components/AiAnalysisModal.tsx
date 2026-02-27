@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useRef } from 'react';
 import { ApiService } from '../services/api';
 import { AiService } from '../services/ai';
@@ -7,7 +8,6 @@ import {
   Bot, 
   Play, 
   BrainCircuit,
-  Key,
   Loader2,
   ShieldAlert,
   FileCode,
@@ -25,14 +25,13 @@ interface AiAnalysisModalProps {
 const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({ isOpen, onClose, tickets, onAnalysisUpdate }) => {
   const [step, setStep] = useState<'config' | 'processing' | 'complete'>('config');
   
-  // Default Config
+  // Default Config - API Key removed to comply with environment-only security rules
   const [config, setConfig] = useState<AiConfig>({
-    apiKey: '',
-    model: 'gemini-2.5-flash',
-    rpm: 30 // Increased default slightly for better UX
+    model: 'gemini-3-flash-preview',
+    rpm: 30 
   });
   
-  // Load models statically
+  // Load models statically (Gemini 3 series)
   const availableModels = AiService.getModels();
 
   const [progress, setProgress] = useState(0);
@@ -83,14 +82,11 @@ const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({ isOpen, onClose, tick
   const startAnalysis = async () => {
     setAuthError('');
     
-    // 1. Verify Connection
-    // Quick validation if key is provided, otherwise rely on env/process
-    if (config.apiKey) {
-        const isValid = await AiService.validateApiKey(config.apiKey);
-        if (!isValid) {
-            setAuthError('Connection failed. Please check your API Key.');
-            return;
-        }
+    // 1. Verify Connection using internal environment key
+    const isValid = await AiService.validateApiKey();
+    if (!isValid) {
+        setAuthError('Connection failed. Please ensure API_KEY is correctly set in your environment.');
+        return;
     }
 
     setStep('processing');
@@ -100,7 +96,6 @@ const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({ isOpen, onClose, tick
     isRunningRef.current = true;
 
     const delayMs = Math.max(100, 60000 / config.rpm);
-    // Limit to 50 for safety in this demo, or remove limit for prod
     const ticketsToProcess = tickets; 
 
     for (let i = 0; i < ticketsToProcess.length; i++) {
@@ -116,8 +111,7 @@ const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({ isOpen, onClose, tick
         const result = await AiService.analyzeTicket(
             ticket, 
             historyResponse.content, 
-            config.model,
-            config.apiKey
+            config.model
         );
 
         // Send result back to parent immediately
@@ -198,7 +192,7 @@ const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({ isOpen, onClose, tick
             </div>
             <div>
                 <h2 className="text-lg font-bold text-slate-800">AI Quality Audit</h2>
-                <p className="text-xs text-slate-500">Powered by Gemini 2.5</p>
+                <p className="text-xs text-slate-500">Powered by Gemini 3</p>
             </div>
           </div>
           <button onClick={onClose} className="p-2 hover:bg-slate-200 rounded-lg text-slate-500 transition-colors">
@@ -226,24 +220,6 @@ const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({ isOpen, onClose, tick
                 )}
 
                 <div className="space-y-4">
-                    <div>
-                        <label className="block text-sm font-medium text-slate-700 mb-1">
-                            Gemini API Key <span className="text-slate-400 font-normal">(Optional)</span>
-                        </label>
-                        <div className="relative">
-                           <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                             <Key className="h-4 w-4 text-slate-400" />
-                           </div>
-                           <input 
-                               type="password"
-                               value={config.apiKey || ''}
-                               onChange={(e) => setConfig({...config, apiKey: e.target.value})}
-                               placeholder="Use Default Environment Key"
-                               className="w-full rounded-lg border-slate-300 shadow-sm focus:border-purple-500 focus:ring-purple-500 py-2.5 pl-10 pr-3 bg-white text-slate-900 placeholder:text-slate-400"
-                           />
-                        </div>
-                    </div>
-
                     <div className="grid grid-cols-2 gap-4">
                         <div>
                             <label className="block text-sm font-medium text-slate-700 mb-1">Select Model</label>
